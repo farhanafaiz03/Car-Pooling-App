@@ -367,6 +367,33 @@ export const healthAPI = {
   }
 };
 
+// AI Chat API
+export const aiChatAPI = {
+  async sendMessage(message: string, conversationHistory?: any[], context: string = 'rideshare') {
+    return apiRequest('/ai/chat', {
+      method: 'POST',
+      body: JSON.stringify({
+        message,
+        conversation_history: conversationHistory,
+        context
+      }),
+    });
+  },
+
+  async getStatus() {
+    return apiRequest('/ai/chat/status');
+  },
+
+  async saveConversation(userMessage: string, aiResponse: string) {
+    return apiRequest('/ai/chat/save-conversation', {
+      method: 'POST',
+      body: JSON.stringify({
+        user_message: userMessage,
+        ai_response: aiResponse,
+      }),
+    });
+  }
+};
 // Export a test function to verify connection
 export const testConnection = async () => {
   try {

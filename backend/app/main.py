@@ -39,6 +39,7 @@ from app.api.rides import router as rides_router
 from app.api.messages import router as messages_router
 from app.api.cars import router as cars_router
 from app.api.locations import router as locations_router
+from app.api.ai_chat import router as ai_chat_router
 
 app.include_router(auth_router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(users_router, prefix="/api/users", tags=["Users"])
@@ -46,6 +47,7 @@ app.include_router(rides_router, prefix="/api/rides", tags=["Rides"])
 app.include_router(messages_router, prefix="/api/messages", tags=["Messages"])
 app.include_router(cars_router, prefix="/api/cars", tags=["Cars"])
 app.include_router(locations_router, prefix="/api/locations", tags=["Locations"])
+app.include_router(ai_chat_router, prefix="/api/ai", tags=["AI Chat"])
 
 
 @app.get("/")

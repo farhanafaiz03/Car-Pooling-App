@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     # Redis
     REDIS_URL: str
     
+    # OpenAI Configuration
+    OPENAI_API_KEY: Optional[str] = Field(default=None)
+    OPENAI_MODEL: str = Field(default="gpt-3.5-turbo")
+    
   # --------------------------
     # Email Configuration
     # --------------------------

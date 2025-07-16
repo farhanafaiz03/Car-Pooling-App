@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   ScrollView,
   TouchableOpacity,
@@ -10,23 +10,69 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
-import { ArrowLeft } from 'lucide-react-native';
+import { ArrowLeft, Send, Bot, User } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { aiChatAPI } from '../../services/api';
+
+interface Message {
+  id: number;
+  sender: 'user' | 'bot';
+  text: string;
+  timestamp: Date;
+}
 
 export default function RideChatScreen() {
   const [input, setInput] = useState('');
-  const [messages, setMessages] = useState([
-    { id: 1, sender: 'bot', text: 'Hi there! How can I assist you today?' },
+  const [messages, setMessages] = useState<Message[]>([
+    { 
+      id: 1, 
+      sender: 'bot', 
+      text: 'Hi there! I\'m your AI assistant for Commute.io. How can I help you with your rideshare experience today?',
+      timestamp: new Date()
+    },
   ]);
   const [sending, setSending] = useState(false);
+  const [aiStatus, setAiStatus] = useState<{available: boolean, status: string} | null>(null);
+  const scrollViewRef = useRef<ScrollView>(null);
+
+  useEffect(() => {
+    checkAIStatus();
+  }, []);
+
+  useEffect(() => {
+    // Auto-scroll to bottom when new messages are added
+    setTimeout(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+  }, [messages]);
+
+  const checkAIStatus = async () => {
+    try {
+      const status = await aiChatAPI.getStatus();
+      setAiStatus(status);
+      
+      if (!status.available) {
+        setMessages(prev => [...prev, {
+          id: Date.now(),
+          sender: 'bot',
+          text: 'I\'m currently offline. The AI service may not be configured properly. You can still use the app\'s other features!',
+          timestamp: new Date()
+        }]);
+      }
+    } catch (error) {
+      console.error('Failed to check AI status:', error);
+      setAiStatus({ available: false, status: 'error' });
+    }
+  };
 
   const handleBack = () => {
     router.push('/(tabs)');
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const trimmed = input.trim();
     if (!trimmed) {
       Alert.alert('Validation Error', 'Please enter a valid message.');
@@ -38,22 +84,97 @@ export default function RideChatScreen() {
     }
 
     setSending(true);
-    const newMessages = [
-      ...messages,
-      { id: messages.length + 1, sender: 'user', text: trimmed },
-    ];
-    setMessages(newMessages);
+    
+    // Add user message immediately
+    const userMessage: Message = {
+      id: Date.now(),
+      sender: 'user',
+      text: trimmed,
+      timestamp: new Date()
+    };
+    
+    setMessages(prev => [...prev, userMessage]);
     setInput('');
 
-    setTimeout(() => {
-      const aiResponse = {
-        id: newMessages.length + 1,
+    try {
+      // Prepare conversation history for context
+      const conversationHistory = messages.map(msg => ({
+        sender: msg.sender,
+        text: msg.text
+      }));
+
+      // Get AI response
+      const response = await aiChatAPI.sendMessage(trimmed, conversationHistory, 'rideshare');
+      
+      // Add AI response
+      const aiMessage: Message = {
+        id: Date.now() + 1,
         sender: 'bot',
-        text: "Thanks! I'm processing your request...",
+        text: response.response,
+        timestamp: new Date()
       };
-      setMessages([...newMessages, aiResponse]);
+      
+      setMessages(prev => [...prev, aiMessage]);
+
+    } catch (error) {
+      console.error('Error sending message:', error);
+      
+      // Add error message
+      const errorMessage: Message = {
+        id: Date.now() + 1,
+        sender: 'bot',
+        text: 'I\'m sorry, I\'m having trouble responding right now. Please try again in a moment, or contact support if the issue persists.',
+        timestamp: new Date()
+      };
+      
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
       setSending(false);
-    }, 1500);
+    }
+  };
+
+  const renderMessage = (message: Message) => {
+    const isUser = message.sender === 'user';
+    
+    return (
+      <View
+        key={message.id}
+        style={[
+          styles.messageRow,
+          isUser ? styles.userMessageRow : styles.botMessageRow,
+        ]}
+      >
+        {!isUser && (
+          <View style={styles.avatarContainer}>
+            <Bot size={20} color="#4ECDC4" />
+          </View>
+        )}
+        
+        <View style={[
+          styles.messageBubble,
+          isUser ? styles.userBubble : styles.botBubble
+        ]}>
+          <Text style={[
+            styles.messageText,
+            isUser ? styles.userMessageText : styles.botMessageText
+          ]}>
+            {message.text}
+          </Text>
+          <Text style={[
+            styles.timestamp,
+            isUser ? styles.userTimestamp : styles.botTimestamp
+          ]}>
+            {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </Text>
+        </View>
+        
+        {isUser && (
+          <View style={styles.avatarContainer}>
+            <User size={20} color="#ffffff" />
+          </View>
+        )}
+      </View>
+    );
   };
 
   return (
@@ -62,80 +183,74 @@ export default function RideChatScreen() {
       style={{ flex: 1 }}
     >
       <SafeAreaView style={styles.container}>
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backButton} onPress={handleBack}>
+            <ArrowLeft size={24} color="#2d3748" />
+          </TouchableOpacity>
+          <View style={styles.headerInfo}>
+            <Text style={styles.title}>AI Assistant</Text>
+            <View style={styles.statusContainer}>
+              <View style={[
+                styles.statusDot, 
+                { backgroundColor: aiStatus?.available ? '#10B981' : '#EF4444' }
+              ]} />
+              <Text style={styles.statusText}>
+                {aiStatus?.available ? 'Online' : 'Offline'}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.placeholder} />
+        </View>
+
+        {/* Messages */}
         <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={{ padding: 24 }}
+          ref={scrollViewRef}
+          style={styles.messagesContainer}
+          contentContainerStyle={{ paddingVertical: 16 }}
           showsVerticalScrollIndicator={false}
         >
-          {/* Header */}
-          <View style={styles.header}>
-            <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-              <ArrowLeft size={24} color="#2d3748" />
-            </TouchableOpacity>
-            <Text style={styles.title}>Ride Chat</Text>
-            <View style={styles.placeholder} />
-          </View>
-
-          {/* Chat Messages */}
-          {messages.map((msg, index) => (
-            <View
-              key={index}
-              style={[
-                styles.messageRow,
-                msg.sender === 'user' ? styles.userMessageRow : {},
-              ]}
-            >
-              {msg.sender === 'bot' && (
-                <Image
-                  source={require('../../assets/images/ailogo.png')}
-                  style={styles.avatar}
-                />
-              )}
-              <View
-                style={msg.sender === 'user' ? styles.userBubble : styles.botBubble}
-              >
-                <Text
-                  style={
-                    msg.sender === 'user'
-                      ? styles.userMessageText
-                      : styles.messageText
-                  }
-                >
-                  {msg.text}
-                </Text>
+          {messages.map(renderMessage)}
+          
+          {sending && (
+            <View style={[styles.messageRow, styles.botMessageRow]}>
+              <View style={styles.avatarContainer}>
+                <Bot size={20} color="#4ECDC4" />
               </View>
-              {msg.sender === 'user' && (
-                <Image
-                  source={require('../../assets/images/userlogo.jpeg')}
-                  style={styles.avatar}
-                />
-              )}
+              <View style={[styles.messageBubble, styles.botBubble, styles.typingBubble]}>
+                <ActivityIndicator size="small" color="#4ECDC4" />
+                <Text style={styles.typingText}>AI is typing...</Text>
+              </View>
             </View>
-          ))}
+          )}
         </ScrollView>
 
         {/* Input */}
-        <View style={styles.inputWrapper}>
+        <View style={styles.inputContainer}>
           <TextInput
-            placeholder="Type your request..."
+            placeholder="Ask me anything about rideshare..."
+            style={styles.input}
+            placeholderTextColor="#9CA3AF"
             value={input}
             onChangeText={setInput}
-            style={styles.input}
-            placeholderTextColor="#aaa"
             editable={!sending}
             maxLength={1000}
+            multiline
+            onSubmitEditing={handleSend}
           />
           <TouchableOpacity
             onPress={handleSend}
             style={[
               styles.sendButton,
-              { backgroundColor: sending ? '#ccc' : '#14B8A6' },
+              { backgroundColor: sending || !input.trim() ? '#E5E7EB' : '#4ECDC4' },
             ]}
-            disabled={sending}
+            disabled={sending || !input.trim()}
           >
-            <Text style={styles.sendButtonText}>
-              {sending ? 'Sending...' : 'Send'}
-            </Text>
+            {sending ? (
+              <ActivityIndicator size="small" color="#ffffff" />
+            ) : (
+              <Send size={20} color="#ffffff" />
+            )}
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -146,18 +261,14 @@ export default function RideChatScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
-  },
-  scroll: {
-    flex: 1,
+    backgroundColor: '#f8fffe',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: 8,         // Added space above
-    paddingBottom: 12,     // Reduced bottom space for better alignment
     paddingHorizontal: 24,
+    paddingVertical: 16,
     backgroundColor: '#ffffff',
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
@@ -170,76 +281,141 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  headerInfo: {
+    alignItems: 'center',
+  },
   title: {
-    fontSize: 20,                   // Slightly larger font
-    fontWeight: '600',
+    fontSize: 18,
+    fontFamily: 'Inter-SemiBold',
     color: '#2d3748',
-    marginTop: 2,                   // Slight upward push
+    marginBottom: 4,
+  },
+  statusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  statusText: {
+    fontSize: 12,
+    fontFamily: 'Inter-Regular',
+    color: '#6B7280',
   },
   placeholder: {
     width: 40,
   },
+  messagesContainer: {
+    flex: 1,
+    paddingHorizontal: 16,
+  },
   messageRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'flex-end',
     marginVertical: 8,
+    gap: 12,
   },
   userMessageRow: {
     justifyContent: 'flex-end',
   },
-  avatar: {
+  botMessageRow: {
+    justifyContent: 'flex-start',
+  },
+  avatarContainer: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    marginRight: 8,
-    marginLeft: 4,
+    backgroundColor: '#4ECDC4',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  messageBubble: {
+    maxWidth: '75%',
+    padding: 12,
+    borderRadius: 16,
   },
   botBubble: {
-    backgroundColor: '#F1F1F1',
-    padding: 12,
-    borderRadius: 15,
-    maxWidth: '80%',
+    backgroundColor: '#ffffff',
+    borderBottomLeftRadius: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
   userBubble: {
-    backgroundColor: '#37BEB0',
-    padding: 12,
-    borderRadius: 15,
-    maxWidth: '80%',
+    backgroundColor: '#4ECDC4',
+    borderBottomRightRadius: 4,
   },
   messageText: {
-    fontSize: 15,
-    color: '#333',
+    fontSize: 16,
+    fontFamily: 'Inter-Regular',
+    lineHeight: 22,
+  },
+  botMessageText: {
+    color: '#2d3748',
   },
   userMessageText: {
-    fontSize: 15,
-    color: '#fff',
+    color: '#ffffff',
   },
-  inputWrapper: {
+  timestamp: {
+    fontSize: 11,
+    fontFamily: 'Inter-Regular',
+    marginTop: 4,
+  },
+  botTimestamp: {
+    color: '#9CA3AF',
+  },
+  userTimestamp: {
+    color: 'rgba(255, 255, 255, 0.8)',
+  },
+  typingBubble: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderColor: '#ddd',
+    gap: 8,
+  },
+  typingText: {
+    fontSize: 14,
+    fontFamily: 'Inter-Regular',
+    color: '#6B7280',
+    fontStyle: 'italic',
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#ffffff',
     borderTopWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: '#fff',
+    borderTopColor: '#E5E7EB',
+    gap: 12,
   },
   input: {
     flex: 1,
-    fontSize: 15,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderRadius: 8,
+    fontSize: 16,
+    fontFamily: 'Inter-Regular',
+    color: '#2d3748',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     backgroundColor: '#F9FAFB',
-    color: '#000',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    maxHeight: 100,
   },
   sendButton: {
-    marginLeft: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8,
-  },
-  sendButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#4ECDC4',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
   },
 });
